@@ -25,6 +25,7 @@ var CLI struct {
 	Keys       KeysCmd       `cmd:"" help:"List available key names."`
 	LCD        LCDCmd        `cmd:"" name:"lcd" help:"Upload image to LCD screen."`
 	Remap      RemapCmd      `cmd:"" help:"Remap keys (supports key swap, media, mouse, combos)."`
+	GUI        GUICmd        `cmd:"" name:"gui" help:"Start a local web GUI in the browser."`
 }
 
 func main() {
@@ -248,6 +249,20 @@ func (c *LCDCmd) Run() error {
 	return nil
 }
 
+// keyRows groups key names by physical keyboard row, used by the keys
+// command and the GUI.
+var keyRows = []struct {
+	Label string   `json:"label"`
+	Keys  []string `json:"keys"`
+}{
+	{"Function row", []string{"esc", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "printscreen", "scrolllock", "pause"}},
+	{"Number row", []string{"grave", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "minus", "equal", "backspace", "insert", "home", "pageup", "numlock", "numslash", "numstar", "numminus"}},
+	{"QWERTY row", []string{"tab", "q", "w", "e", "r", "t", "y", "u", "i", "o", "p", "lbracket", "rbracket", "backslash", "delete", "end", "pagedown", "num7", "num8", "num9", "numplus"}},
+	{"Home row", []string{"capslock", "a", "s", "d", "f", "g", "h", "j", "k", "l", "semicolon", "quote", "enter", "num4", "num5", "num6"}},
+	{"Shift row", []string{"lshift", "z", "x", "c", "v", "b", "n", "m", "comma", "dot", "slash", "rshift", "up", "num1", "num2", "num3", "numenter"}},
+	{"Bottom row", []string{"lctrl", "lwin", "lalt", "space", "ralt", "fn", "menu", "rctrl", "left", "down", "right", "num0", "numdot"}},
+}
+
 // KeysCmd lists all available key names.
 type KeysCmd struct{}
 
@@ -255,20 +270,8 @@ type KeysCmd struct{}
 func (c *KeysCmd) Run() error {
 	fmt.Println("Available key names:")
 	fmt.Println()
-
-	rows := []struct {
-		label string
-		keys  []string
-	}{
-		{"Function row", []string{"esc", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "printscreen", "scrolllock", "pause"}},
-		{"Number row", []string{"grave", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "minus", "equal", "backspace", "insert", "home", "pageup", "numlock", "numslash", "numstar", "numminus"}},
-		{"QWERTY row", []string{"tab", "q", "w", "e", "r", "t", "y", "u", "i", "o", "p", "lbracket", "rbracket", "backslash", "delete", "end", "pagedown", "num7", "num8", "num9", "numplus"}},
-		{"Home row", []string{"capslock", "a", "s", "d", "f", "g", "h", "j", "k", "l", "semicolon", "quote", "enter", "num4", "num5", "num6"}},
-		{"Shift row", []string{"lshift", "z", "x", "c", "v", "b", "n", "m", "comma", "dot", "slash", "rshift", "up", "num1", "num2", "num3", "numenter"}},
-		{"Bottom row", []string{"lctrl", "lwin", "lalt", "space", "ralt", "fn", "menu", "rctrl", "left", "down", "right", "num0", "numdot"}},
-	}
-	for _, row := range rows {
-		fmt.Printf("  %s: %s\n", row.label, strings.Join(row.keys, ", "))
+	for _, row := range keyRows {
+		fmt.Printf("  %s: %s\n", row.Label, strings.Join(row.Keys, ", "))
 	}
 	return nil
 }

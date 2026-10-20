@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>F108 Pro</title>
+<style>
+  :root { --bg: #16181d; --panel: #22252c; --border: #363a44; --fg: #e6e6e6; --muted: #9aa0ab; --accent: #4f8cff; --err: #ff5c5c; --ok: #4fce7a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; }
+  header { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  header h1 { font-size: 16px; margin: 0 16px 0 0; }
+  nav button { background: none; border: 1px solid transparent; color: var(--muted); padding: 6px 12px; border-radius: 6px; cursor: pointer; }
+  nav button.active { color: var(--fg); border-color: var(--border); background: var(--panel); }
+  main { max-width: 960px; margin: 0 auto; padding: 16px; }
+  section { display: none; }
+  section.active { display: block; }
+  .row { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; margin-bottom: 12px; }
+  label { display: flex; align-items: center; gap: 6px; }
+  select, input[type=number], input[type=text] { background: var(--panel); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 5px 8px; }
+  input[type=color] { width: 40px; height: 28px; padding: 0; border: 1px solid var(--border); background: none; }
+  input[type=range] { width: 120px; }
+  button.primary { background: var(--accent); color: #fff; border: 0; padding: 7px 14px; border-radius: 6px; cursor: pointer; }
+  button.secondary { background: var(--panel); color: var(--fg); border: 1px solid var(--border); padding: 7px 14px; border-radius: 6px; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  .hint { color: var(--muted); font-size: 12px; }
+  #status { margin-left: auto; font-size: 13px; }
+  #status.err { color: var(--err); }
+  #status.ok { color: var(--ok); }
+  .kbd { display: flex; flex-direction: column; gap: 4px; margin: 12px 0; }
+  .kbd .r { display: flex; flex-wrap: wrap; gap: 4px; }
+  .kbd .k { min-width: 34px; padding: 4px 6px; font-size: 11px; text-align: center; border: 1px solid var(--border); border-radius: 4px; background: var(--panel); cursor: pointer; user-select: none; }
+  .kbd .k.set { border-color: #fff8; }
+  .remaps { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+  .remap { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .remap .mods label { font-size: 12px; margin-right: 4px; }
+  #preset-list { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
+  .preset { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 10px; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; }
+  .preset b { margin-right: 4px; }
+  .preset .tags { color: var(--muted); font-size: 12px; flex: 1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Aula F108 Pro</h1>
+  <nav>
+    <button data-tab="light" class="active">Backlight</button>
+    <button data-tab="perkey">Per-key RGB</button>
+    <button data-tab="remap">Remap</button>
+    <button data-tab="clock">Clock</button>
+    <button data-tab="presets">Presets</button>
+  </nav>
+  <span id="status"></span>
+</header>
+
+<main>
+  <section id="light" class="active">
+    <div class="row">
+      <label>Mode <select id="l-mode"></select></label>
+      <label>Brightness <input type="range" id="l-bri" min="0" max="5" value="5"> <span id="l-bri-v">5</span></label>
+      <label>Speed <input type="range" id="l-spd" min="0" max="5" value="3"> <span id="l-spd-v">3</span></label>
+    </div>
+    <div class="row">
+      <label>Color <input type="color" id="l-color" value="#ffffff"></label>
+      <label><input type="checkbox" id="l-rainbow"> Rainbow</label>
+      <label>Direction <select id="l-dir"><option>0</option><option>1</option><option>2</option><option>3</option></select></label>
+      <span class="hint" id="l-hint"></span>
+    </div>
+    <div class="row">
+      <button class="primary" id="l-apply">Apply</button>
+      <button class="secondary" id="l-off">Turn off backlight</button>
+    </div>
+  </section>
+
+  <section id="perkey">
+    <div class="row">
+      <label><input type="checkbox" id="p-all-on"> Base color for all keys <input type="color" id="p-all" value="#000032"></label>
+      <label>Brightness <input type="range" id="p-bri" min="0" max="5" value="5"> <span id="p-bri-v">5</span></label>
+    </div>
+    <div class="row">
+      <label>Paint color <input type="color" id="p-paint" value="#00ff00"></label>
+      <span class="hint">Click a key to paint it; click again with the same color to clear it.</span>
+      <button class="secondary" id="p-clear">Clear keys</button>
+    </div>
+    <div class="kbd" id="p-kbd"></div>
+    <div class="row">
+      <button class="primary" id="p-apply">Apply</button>
+      <span class="hint">Base color black (#000000) means "no base": only painted keys are sent.</span>
+    </div>
+  </section>
+
+  <section id="remap">
+    <div class="row">
+      <label><input type="radio" name="layer" value="normal" checked> Normal layer</label>
+      <label><input type="radio" name="layer" value="fn"> FN layer</label>
+    </div>
+    <div id="remaps-normal" class="remaps"></div>
+    <div id="remaps-fn" class="remaps" style="display:none"></div>
+    <div class="row">
+      <button class="secondary" id="r-add">+ Add remap</button>
+      <button class="primary" id="r-apply">Apply</button>
+      <button class="secondary" id="r-reset">Reset layer</button>
+      <button class="secondary" id="r-defaults">Restore default keys (both layers)</button>
+    </div>
+    <p class="hint">Each apply replaces the whole remap table on the selected layer.</p>
+  </section>
+
+  <section id="clock">
+    <div class="row">
+      <button class="primary" id="c-sync">Sync LCD clock to system time</button>
+    </div>
+  </section>
+
+  <section id="presets">
+    <div class="row">
+      <label>Name <input type="text" id="ps-name" placeholder="e.g. Gaming"></label>
+      <label><input type="checkbox" id="ps-light" checked> Backlight</label>
+      <label><input type="checkbox" id="ps-perkey"> Per-key RGB</label>
+      <label><input type="checkbox" id="ps-normal" checked> Remap (normal)</label>
+      <label><input type="checkbox" id="ps-fn"> Remap (FN)</label>
+      <button class="primary" id="ps-save">Save current settings</button>
+    </div>
+    <p class="hint">A preset stores the checked sections as they are set in the other tabs. Applying a preset loads it into the tabs and sends it to the keyboard. A remap section with no rows restores that layer to defaults.</p>
+    <div id="preset-list"></div>
+    <div class="row">
+      <button class="secondary" id="ps-defaults">Restore default keys (both layers)</button>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const status = $('#status');
+let meta;
+
+function setStatus(msg, cls) { status.textContent = msg; status.className = cls || ''; }
+
+async function api(path, body) {
+  setStatus('Working…');
+  document.querySelectorAll('button').forEach(b => b.disabled = true);
+  try {
+    const res = await fetch('/api/' + path, {
+      method: body === undefined ? 'GET' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || res.statusText);
+    if (data.message) setStatus(data.message, 'ok');
+    return data;
+  } catch (e) {
+    setStatus(e.message, 'err');
+    throw e;
+  } finally {
+    document.querySelectorAll('button').forEach(b => b.disabled = false);
+  }
+}
+
+function hexToRGB(hex) { return [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16)); }
+function rgbToHex(c) { return '#' + c.map(v => v.toString(16).padStart(2, '0')).join(''); }
+function option(value, text) { const o = document.createElement('option'); o.value = value; o.textContent = text ?? value; return o; }
+
+// Tabs.
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('nav button, section').forEach(el => el.classList.remove('active'));
+  b.classList.add('active');
+  $('#' + b.dataset.tab).classList.add('active');
+});
+
+// Range value labels.
+for (const id of ['l-bri', 'l-spd', 'p-bri']) {
+  $('#' + id).oninput = (e) => $('#' + id + '-v').textContent = e.target.value;
+}
+
+// Backlight.
+const DIR_MODES = new Set([10, 11, 12, 16, 18]);
+const RAINBOW_MODES = new Set([6, 8]);
+function updateLightControls() {
+  const mode = +$('#l-mode').value;
+  $('#l-dir').disabled = !DIR_MODES.has(mode);
+  const forced = RAINBOW_MODES.has(mode);
+  if (forced) $('#l-rainbow').checked = true;
+  $('#l-rainbow').disabled = forced;
+  $('#l-color').disabled = $('#l-rainbow').checked;
+  $('#l-hint').textContent = forced ? 'This mode is always rainbow.' : DIR_MODES.has(mode) ? '' : 'Direction is ignored by this mode.';
+}
+$('#l-mode').onchange = updateLightControls;
+$('#l-rainbow').onchange = updateLightControls;
+function getLight() {
+  return {
+    mode: +$('#l-mode').value,
+    brightness: +$('#l-bri').value,
+    speed: +$('#l-spd').value,
+    color: hexToRGB($('#l-color').value),
+    colorful: $('#l-rainbow').checked,
+    direction: +$('#l-dir').value,
+  };
+}
+function setLight(c) {
+  $('#l-mode').value = c.mode;
+  $('#l-bri').value = c.brightness; $('#l-bri-v').textContent = c.brightness;
+  $('#l-spd').value = c.speed; $('#l-spd-v').textContent = c.speed;
+  $('#l-color').value = rgbToHex(c.color);
+  $('#l-rainbow').checked = c.colorful;
+  $('#l-dir').value = c.direction;
+  updateLightControls();
+}
+$('#l-apply').onclick = () => api('light', getLight());
+$('#l-off').onclick = () => api('off', {});
+
+// Per-key RGB.
+const painted = {}; // key name -> [r,g,b]
+function renderKeys() {
+  const kbd = $('#p-kbd');
+  kbd.innerHTML = '';
+  for (const row of meta.keyRows) {
+    const r = document.createElement('div');
+    r.className = 'r';
+    for (const name of row.keys) {
+      const k = document.createElement('div');
+      k.className = 'k';
+      k.textContent = name;
+      k.dataset.key = name;
+      k.onclick = () => {
+        const c = hexToRGB($('#p-paint').value);
+        if (painted[name] && painted[name].join() === c.join()) delete painted[name];
+        else painted[name] = c;
+        paintKey(k);
+      };
+      paintKey(k);
+      r.appendChild(k);
+    }
+    kbd.appendChild(r);
+  }
+}
+function paintKey(k) {
+  const c = painted[k.dataset.key];
+  k.classList.toggle('set', !!c);
+  k.style.background = c ? `rgb(${c.join(',')})` : '';
+  k.style.color = c && (c[0] * .299 + c[1] * .587 + c[2] * .114) > 140 ? '#000' : '';
+}
+$('#p-clear').onclick = () => { for (const k in painted) delete painted[k]; renderKeys(); };
+function getPerkey() {
+  return {
+    all: $('#p-all-on').checked ? hexToRGB($('#p-all').value) : [0, 0, 0],
+    brightness: +$('#p-bri').value,
+    keys: painted,
+  };
+}
+function setPerkey(p) {
+  const hasAll = p.all.some(v => v);
+  $('#p-all-on').checked = hasAll;
+  if (hasAll) $('#p-all').value = rgbToHex(p.all);
+  $('#p-bri').value = p.brightness; $('#p-bri-v').textContent = p.brightness;
+  for (const k in painted) delete painted[k];
+  Object.assign(painted, p.keys);
+  renderKeys();
+}
+$('#p-apply').onclick = () => api('perkey', getPerkey());
+
+// Remap. Two independent row lists, one per layer.
+const layerIsFN = () => document.querySelector('input[name=layer]:checked').value === 'fn';
+const remapList = (fn) => $(fn ? '#remaps-fn' : '#remaps-normal');
+document.querySelectorAll('input[name=layer]').forEach(r => r.onchange = () => {
+  $('#remaps-normal').style.display = layerIsFN() ? 'none' : '';
+  $('#remaps-fn').style.display = layerIsFN() ? '' : 'none';
+});
+
+// addRemap appends a row to the given layer, optionally pre-filled from a
+// src key and a dst spec ("a", "media:play", "mouse:lclick", "combo:ctrl+c").
+function addRemap(fn, srcName, dstSpec) {
+  const row = document.createElement('div');
+  row.className = 'remap';
+
+  const src = document.createElement('select');
+  for (const r of meta.keyRows) for (const k of r.keys) src.appendChild(option(k));
+
+  const type = document.createElement('select');
+  for (const t of ['key', 'media', 'mouse', 'combo']) type.appendChild(option(t));
+
+  const keySel = document.createElement('select');
+  for (const r of meta.keyRows) for (const k of r.keys) keySel.appendChild(option(k));
+  const mediaSel = document.createElement('select');
+  for (const m of meta.media) mediaSel.appendChild(option(m));
+  const mouseSel = document.createElement('select');
+  for (const m of meta.mouse) mouseSel.appendChild(option(m));
+  const mods = document.createElement('span');
+  mods.className = 'mods';
+  for (const m of meta.modifiers) {
+    const l = document.createElement('label');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.value = m;
+    l.append(cb, m);
+    mods.appendChild(l);
+  }
+
+  const del = document.createElement('button');
+  del.className = 'secondary'; del.textContent = '×';
+  del.onclick = () => row.remove();
+
+  const arrow = document.createElement('span'); arrow.textContent = '→';
+  row.append(src, arrow, type, mods, keySel, mediaSel, mouseSel, del);
+
+  const update = () => {
+    const t = type.value;
+    mods.style.display = t === 'combo' ? '' : 'none';
+    keySel.style.display = t === 'key' || t === 'combo' ? '' : 'none';
+    mediaSel.style.display = t === 'media' ? '' : 'none';
+    mouseSel.style.display = t === 'mouse' ? '' : 'none';
+  };
+  type.onchange = update;
+  update();
+
+  row.spec = () => {
+    const t = type.value;
+    if (t === 'key') return keySel.value;
+    if (t === 'media') return 'media:' + mediaSel.value;
+    if (t === 'mouse') return 'mouse:' + mouseSel.value;
+    const m = [...mods.querySelectorAll('input:checked')].map(c => c.value);
+    return 'combo:' + [...m, keySel.value].join('+');
+  };
+  row.src = src;
+
+  if (srcName) src.value = srcName;
+  if (dstSpec) {
+    const [prefix, rest] = dstSpec.includes(':') ? dstSpec.split(':', 2) : ['key', dstSpec];
+    type.value = prefix;
+    if (prefix === 'media') mediaSel.value = rest;
+    else if (prefix === 'mouse') mouseSel.value = rest;
+    else if (prefix === 'combo') {
+      const parts = rest.split('+');
+      keySel.value = parts.pop();
+      mods.querySelectorAll('input').forEach(cb => cb.checked = parts.includes(cb.value));
+    } else keySel.value = rest;
+    update();
+  }
+  remapList(fn).appendChild(row);
+}
+const remapPairs = (fn) => [...remapList(fn).querySelectorAll('.remap')].map(r => ({ src: r.src.value, dst: r.spec() }));
+function setRemaps(fn, pairs) {
+  remapList(fn).innerHTML = '';
+  for (const p of pairs) addRemap(fn, p.src, p.dst);
+}
+// sendRemaps applies pairs to a layer; an empty list resets it to defaults.
+const sendRemaps = (fn, pairs) => api('remap', { fn, reset: pairs.length === 0, pairs });
+
+$('#r-add').onclick = () => addRemap(layerIsFN());
+$('#r-apply').onclick = () => {
+  const pairs = remapPairs(layerIsFN());
+  if (pairs.length === 0) { setStatus('Add at least one remap, or use Reset layer.', 'err'); return; }
+  sendRemaps(layerIsFN(), pairs);
+};
+$('#r-reset').onclick = () => {
+  if (confirm('Clear all remaps on the ' + (layerIsFN() ? 'FN' : 'normal') + ' layer?'))
+    sendRemaps(layerIsFN(), []);
+};
+async function restoreDefaultKeys() {
+  if (!confirm('Restore default key mapping on both layers?')) return;
+  await sendRemaps(false, []);
+  await sendRemaps(true, []);
+  setRemaps(false, []); setRemaps(true, []);
+  setStatus('Default key mapping restored on both layers.', 'ok');
+}
+$('#r-defaults').onclick = restoreDefaultKeys;
+$('#ps-defaults').onclick = restoreDefaultKeys;
+
+// Clock.
+$('#c-sync').onclick = () => api('clock', {});
+
+// Presets. Stored server-side as an opaque JSON list:
+// { name, light?, perkey?, remapNormal?, remapFn? } — present sections are applied.
+let presets = [];
+async function savePresets() {
+  await fetch('/api/presets', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(presets) })
+    .then(async res => { if (!res.ok) throw new Error((await res.json()).error); });
+  renderPresets();
+}
+function renderPresets() {
+  const list = $('#preset-list');
+  list.innerHTML = '';
+  if (presets.length === 0) { list.innerHTML = '<p class="hint">No presets yet.</p>'; return; }
+  presets.forEach((p, i) => {
+    const el = document.createElement('div');
+    el.className = 'preset';
+    const name = document.createElement('b'); name.textContent = p.name;
+    const tags = document.createElement('span');
+    tags.className = 'tags';
+    tags.textContent = [
+      p.light && `backlight: ${meta.modes[p.light.mode].name}`,
+      p.perkey && `per-key: ${Object.keys(p.perkey.keys).length} keys`,
+      p.remapNormal && `remap normal: ${p.remapNormal.length || 'defaults'}`,
+      p.remapFn && `remap FN: ${p.remapFn.length || 'defaults'}`,
+    ].filter(Boolean).join(' · ');
+    const apply = document.createElement('button');
+    apply.className = 'primary'; apply.textContent = 'Apply';
+    apply.onclick = () => applyPreset(p);
+    const del = document.createElement('button');
+    del.className = 'secondary'; del.textContent = 'Delete';
+    del.onclick = () => { if (confirm(`Delete preset "${p.name}"?`)) { presets.splice(i, 1); savePresets().catch(e => setStatus(e.message, 'err')); } };
+    el.append(name, tags, apply, del);
+    list.appendChild(el);
+  });
+}
+async function applyPreset(p) {
+  try {
+    if (p.light) { setLight(p.light); await api('light', p.light); }
+    if (p.perkey) { setPerkey(p.perkey); await api('perkey', p.perkey); }
+    if (p.remapNormal) { setRemaps(false, p.remapNormal); await sendRemaps(false, p.remapNormal); }
+    if (p.remapFn) { setRemaps(true, p.remapFn); await sendRemaps(true, p.remapFn); }
+    setStatus(`Preset "${p.name}" applied.`, 'ok');
+  } catch (e) { /* status already shows the error */ }
+}
+$('#ps-save').onclick = () => {
+  const name = $('#ps-name').value.trim();
+  if (!name) { setStatus('Enter a preset name.', 'err'); return; }
+  const p = { name };
+  if ($('#ps-light').checked) p.light = getLight();
+  if ($('#ps-perkey').checked) p.perkey = getPerkey();
+  if ($('#ps-normal').checked) p.remapNormal = remapPairs(false);
+  if ($('#ps-fn').checked) p.remapFn = remapPairs(true);
+  if (Object.keys(p).length === 1) { setStatus('Select at least one section.', 'err'); return; }
+  const idx = presets.findIndex(x => x.name === name);
+  if (idx >= 0) presets[idx] = p; else presets.push(p);
+  savePresets().then(() => setStatus(`Preset "${name}" saved.`, 'ok')).catch(e => setStatus(e.message, 'err'));
+};
+
+// Init.
+Promise.all([api('meta'), api('presets')]).then(([m, ps]) => {
+  meta = m;
+  presets = ps;
+  for (const mode of m.modes) $('#l-mode').appendChild(option(mode.id, `${mode.id} – ${mode.name}`));
+  $('#l-mode').value = 1;
+  updateLightControls();
+  renderKeys();
+  renderPresets();
+  setStatus('');
+});
+</script>
+</body>
+</html>
