@@ -23,6 +23,7 @@ format. This file maps them to their purpose.
 | `FUN_0044f290` | Another send variant  | Calls FUN_00451330. Needs further analysis.                                                                                      |
 | `FUN_0044fe20` | Find device handle    | Searches device list for matching device by interface number. Checks 3 priority levels (0, 1, 2). Returns device handle pointer. |
 | `FUN_0044e830` | Register device mode  | Called during config parsing to register VID/PID/name/type/mode combos into a global device registry.                            |
+| `FUN_0044f4e0` | 2.4G send function    | Adds checksum (byte 31 = sum), writes a 32-byte output report, waits for a reply echoing bytes 0-2. See [hid-protocol.md](hid-protocol.md#24g-wireless-protocol). |
 
 ## Config & Initialization
 
@@ -54,6 +55,16 @@ format. This file maps them to their purpose.
 | `FUN_0042ae20` | Key color readback          | Reads per-key colors via 04 F5, updates custom light UI. NOT macro-related.                                              |
 | `FUN_0042d630` | USB macro sender            | Sends all macros to keyboard (task 8, USB). See [macro-protocol.md](macro-protocol.md).                                  |
 | `FUN_0042dbb0` | 2.4G macro sender           | Sends all macros to keyboard (task 8, 2.4G). See [macro-protocol.md](macro-protocol.md).                                 |
+| `FUN_0044bd80` | Per-key RGB sender (2.4G) | 05 10 mode 0x80 + brightness, then 0x240 buffer as 21 chunks of command 14. ANALYZED. |
+| `FUN_00423c40` | LCD clock sync (2.4G) | Single packet 0C 10. ANALYZED. |
+| `FUN_00418e80` | Key remap sender (2.4G) | 0x240 buffer as 21 chunks, command 10 (normal) or 12 (FN). ANALYZED. |
+| `FUN_004191c0` | Single key remap (2.4G) | 03 04 / 0D 04 <key_index> <4-byte entry>. ANALYZED. |
+| `FUN_004233f0` | LCD image uploader (2.4G) | 7F 03 header, then 28-byte chunks with 24-bit index (0x80 flag). ANALYZED. |
+| `FUN_004357d0` | Battery level query (2.4G) | 20 01 every 15 s, level in reply byte 3. ANALYZED. |
+| `FUN_004144a0` | Function settings (2.4G) | Single packet 07 10. ANALYZED. |
+| `FUN_00434900` | LED layer sender (2.4G) | Single packet 05 01. Calls FUN_00433fd0 over USB. |
+| `FUN_00434ee0` | Apply all settings | USB: macros, remaps, per-key, lighting, LED layer, function settings. 2.4G: 0F, then lighting and LED layer. |
+| `FUN_00432b60` | Unknown (2.4G) | Command 0B 1C, logs "mxn". Purpose unknown. |
 
 ## Task Dispatch
 

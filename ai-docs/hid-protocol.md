@@ -12,9 +12,9 @@ The HID functions are loaded dynamically from `hid.dll` at runtime (see
 `FUN_004509e0` at `0x004509e0`).
 
 **Scope**: This document focuses on the USB wired protocol. The 2.4G wireless
-mode uses a simplified single-packet protocol (command `05 10`) instead of the
-multi-step flow documented here. Bluetooth configuration is not supported by
-the software.
+mode uses single output reports without the begin/apply flow, see
+[2.4G Wireless Protocol](#24g-wireless-protocol). Bluetooth configuration is
+not supported by the software.
 
 ## Light Zones
 The F108 Pro has three independent light zones:
@@ -619,6 +619,152 @@ Offset  Field         Values
 11-61   (padding)     0x00
 62-63   trailer       0x55AA
 ```
+
+## 2.4G Wireless Protocol
+Analyzed from `DeviceDriver.exe` v1.0.0.1 and verified on hardware over the
+TYPE-A dongle (`05AC:024F`) on Linux. Implemented in `pkg/aula/wireless.go`.
+
+### Transport
+The dongle's interface 3 (`MI_03`) is a raw HID channel (usage page `0xFF60`,
+usage `0x61`) with 32-byte input and output reports and no report IDs. There
+are no feature reports: commands are **output reports** (`WriteFile` on
+Windows, `write()` on `/dev/hidrawN` on Linux with a leading `0x00` report ID
+byte), and replies are input reports.
+
+Offsets below are within the 32-byte report, **without** the report ID byte.
+The official software's buffers have the report ID at byte 0, so its offsets
+are one higher.
+
+### Send Function (`FUN_0044f4e0`)
+Every 2.4G command goes through `FUN_0044f4e0`:
+
+1. Byte 31 is set to an 8-bit checksum: the sum of bytes 0-30.
+2. The report is written (33 bytes including the report ID). On failure it
+   retries once after 10 ms.
+3. After 5 ms, up to 20 input reports are read (5 ms timeout each, 10 ms
+   apart) until one whose bytes 0-2 match the command's bytes 0-2. That reply
+   is copied back into the caller's buffer, which is how queries such as the
+   battery level return data.
+
+There is no begin/apply/finalize sequence: each command takes effect on its
+own. The keyboard does not appear to check the checksum (a lighting packet
+without it was accepted), but the reply carries one.
+
+The official software writes every `0x55AA` trailer as a little-endian word,
+i.e. bytes `AA 55` (see `mov WORD PTR [ebp-x], 0x55aa` at `0x0042b297`).
+
+### Chunked Transfers
+Large buffers are split into 28-byte (`0x1C`) chunks, one per report, with a
+2 ms pause between chunks:
+
+```
+Offset  Field
+0       command
+1       chunk length (0x1C, or the remainder for the last chunk)
+2       chunk index (0-based)
+3-30    28 bytes of data
+31      checksum
+```
+
+The buffers are the same as the USB ones: 576 bytes (`0x240`), 4 bytes per key
+at `key_index * 4`, trailer `AA 55` at bytes 574-575. That gives 21 chunks,
+the last one 16 bytes long.
+
+### Commands
+
+| Bytes 0-1 | Function          | Sender         | Verified |
+| --------- | ----------------- | -------------- | -------- |
+| `05 10`   | Lighting mode     | `FUN_0042b1e0` | Yes      |
+| `14`      | Per-key RGB chunk | `FUN_0044bd80` | Yes      |
+| `0C 10`   | Clock sync        | `FUN_00423c40` | Yes      |
+| `10`      | Remap chunk (normal layer) | `FUN_00418e80` | Yes      |
+| `12`      | Remap chunk (FN layer)     | `FUN_00418e80` | No       |
+| `03 04`   | Single key remap (normal)  | `FUN_004191c0` | No      |
+| `0D 04`   | Single key remap (FN)      | `FUN_004191c0` | No      |
+| `7F 03`   | LCD image header           | `FUN_004233f0` | No       |
+| `80`-`FF` | LCD image chunk            | `FUN_004233f0` | No       |
+| `20 01`   | Battery level query        | `FUN_004357d0` | Yes      |
+| `07 10`   | Function settings          | `FUN_004144a0` | No       |
+| `05 01`   | LED layer                  | `FUN_00434900` | No       |
+| `0F`      | Profile reload (unconfirmed) | `FUN_00434ee0` | No     |
+| `0B 1C`   | Unknown ("mxn" trace)      | `FUN_00432b60` | No       |
+
+#### Lighting Mode (`05 10`)
+The USB data packet shifted by 3 bytes:
+
+```
+Offset  Field
+0-2     05 10 00
+3       mode (0x80 = per-key / user light)
+4-6     R, G, B
+7-10    (reserved)
+11      colorful
+12      brightness 0-5
+13      speed 0-5
+14      direction
+15-16   (reserved)
+17-18   trailer AA 55
+```
+
+#### Per-Key RGB (`14`)
+1. Lighting packet `05 10` with mode `0x80` and brightness in byte 12 (the 2.4G
+   equivalent of the USB LED strip preamble).
+2. The 576-byte per-key buffer (`index, R, G, B` per slot) as 21 chunks with
+   command `14`.
+
+A monochrome variant (`this+0x7ac == 0`) sends a 192-byte buffer as 7 chunks,
+the last one 24 bytes long; the F108 Pro is RGB.
+
+#### Clock Sync (`0C 10`)
+The USB clock data packet shifted by 3 bytes, with the trailer moved:
+
+```
+Offset  Field
+0-3     0C 10 00 00
+4       image slot (LCD view index + 1)
+5       0x5A
+6       year % 2000
+7-11    month, day, hour, minute, second
+12      (unused)
+13      day of week (0=Sun)
+17-18   trailer AA 55
+```
+
+#### Key Remap (`10` / `12`)
+The 576-byte remap buffer (same layout as USB `04 11` / `04 27` data) as 21
+chunks with command `10` for the normal layer or `12` for the FN layer.
+
+`FUN_004191c0` remaps a single key instead: `03 04 <key_index> <action> <p1>
+<p2> <p3>` (`0D 04` for the FN layer). The tool always sends the full table.
+
+#### LCD Image Upload (`7F 03`)
+The buffer is the USB format (256-byte header + RGB565 frames) but **not**
+padded to 4096 bytes: only `256 + frames * 64800` bytes are sent, with the last
+chunk padded with `0xFF`.
+
+```
+Header:  7F 03 00 <slot> <chunk count, 24-bit LE>
+Chunk i: <0x80 | i >> 16> <i & 0xFF> <(i >> 8) & 0xFF> <28 bytes of data>
+```
+
+Implemented but not yet tested on hardware. One frame is 2,324 chunks. Every chunk waits for an acknowledgment, so a frame
+takes roughly 45 seconds over the dongle.
+
+#### Battery Level (`20 01`)
+Sent every 15 seconds by the official software. The reply starts with `20`
+and byte 3 is the battery level in percent (capped at 100; 0 means unknown).
+
+#### Not Implemented
+* **Function settings** (`07 10 00 00 01 <c1> <c2> <c3> <fn_switch>
+  <sleep_time> 00 <key_respondtime> ... AA 55`): `c1`-`c3` are three UI
+  checkboxes.
+* **LED layer** (`05 01 00 <layer>` ... trailer `AA 55` at 17-18).
+* **`0F`**: sent by the "apply all settings" routine `FUN_00434ee0`, then
+  lighting and LED layer are re-sent. Over USB the same routine re-sends
+  macros, remaps, per-key colors, lighting, LED layer, and function settings,
+  so `0F` probably makes the keyboard reload its stored profile. Not confirmed.
+* **`0B 1C`**: sends two combo box values and 16 bytes, logged as "mxn".
+  Purpose unknown.
 
 ## Complete Command Reference
 

@@ -26,6 +26,7 @@ var CLI struct {
 	LCD        LCDCmd        `cmd:"" name:"lcd" help:"Upload image to LCD screen."`
 	Remap      RemapCmd      `cmd:"" help:"Remap keys (supports key swap, media, mouse, combos)."`
 	GUI        GUICmd        `cmd:"" name:"gui" help:"Start a local web GUI in the browser."`
+	Battery    BatteryCmd    `cmd:"" help:"Show battery level (2.4G dongle only)."`
 }
 
 func main() {
@@ -192,6 +193,25 @@ func (c *ClockCmd) Run() error {
 		return err
 	}
 	fmt.Printf("Clock synced to %s\n", now.Format("2006-01-02 15:04:05"))
+	return nil
+}
+
+// BatteryCmd prints the battery level.
+type BatteryCmd struct{}
+
+// Run executes the battery command.
+func (c *BatteryCmd) Run() error {
+	dev, err := aula.Open()
+	if err != nil {
+		return err
+	}
+	defer dev.Close()
+
+	level, err := dev.Battery()
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Battery: %d%%\n", level)
 	return nil
 }
 

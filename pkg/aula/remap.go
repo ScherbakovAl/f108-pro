@@ -229,6 +229,18 @@ func (d *Device) ResetFnKeyRemap() error {
 
 // sendRemapTable sends the remap table for either the normal or FN layer.
 func (d *Device) sendRemapTable(remaps []KeyRemap, fnLayer bool) error {
+	buf := remapBuffer(remaps)
+
+	// 2.4G: the same buffer as 28-byte chunks, command 10 (normal) or
+	// 12 (FN), no begin/apply. Mirrors FUN_00418e80.
+	if d.wireless != nil {
+		cmd := byte(0x10)
+		if fnLayer {
+			cmd = 0x12
+		}
+		return d.sendWirelessChunks(cmd, buf)
+	}
+
 	// Step 1: Begin transaction.
 	if err := d.beginTransaction(); err != nil {
 		return fmt.Errorf("begin: %w", err)
@@ -249,23 +261,7 @@ func (d *Device) sendRemapTable(remaps []KeyRemap, fnLayer bool) error {
 		return fmt.Errorf("remap init: %w", err)
 	}
 
-	// Step 3: Build and send remap data buffer (576 bytes).
-	buf := make([]byte, remapBufSize)
-	for _, r := range remaps {
-		idx := int(r.SourceIndex)
-		if idx <= 0 || idx*4+3 >= remapBufSize-2 {
-			continue // Skip invalid indices (0 is unused, avoid trailer area).
-		}
-		off := idx * 4
-		buf[off] = byte(r.Action)
-		buf[off+1] = r.Param1
-		buf[off+2] = r.Param2
-		buf[off+3] = r.Param3
-	}
-	// Trailer 0x55AA (little-endian: bytes AA 55 on the wire).
-	buf[remapBufSize-2] = 0xAA
-	buf[remapBufSize-1] = 0x55
-
+	// Step 3: Send remap data buffer (576 bytes).
 	if err := d.sendMultiPacket(buf, false); err != nil {
 		return fmt.Errorf("remap data: %w", err)
 	}
@@ -281,4 +277,25 @@ func (d *Device) sendRemapTable(remaps []KeyRemap, fnLayer bool) error {
 	}
 
 	return nil
+}
+
+// remapBuffer builds the 576-byte remap buffer: 4 bytes per slot (action,
+// params) at offset key_index*4.
+func remapBuffer(remaps []KeyRemap) []byte {
+	buf := make([]byte, remapBufSize)
+	for _, r := range remaps {
+		idx := int(r.SourceIndex)
+		if idx <= 0 || idx*4+3 >= remapBufSize-2 {
+			continue // Skip invalid indices (0 is unused, avoid trailer area).
+		}
+		off := idx * 4
+		buf[off] = byte(r.Action)
+		buf[off+1] = r.Param1
+		buf[off+2] = r.Param2
+		buf[off+3] = r.Param3
+	}
+	// Trailer 0x55AA (little-endian: bytes AA 55 on the wire).
+	buf[remapBufSize-2] = 0xAA
+	buf[remapBufSize-1] = 0x55
+	return buf
 }

@@ -127,9 +127,12 @@ directly from disk: the page talks to the keyboard through the server's
 ### 2.4G Dongle (Linux only)
 If the keyboard is not connected with a USB cable, the tool falls back to the
 2.4G dongle (`05ac:024f`, via `/dev/hidrawN` of interface 3). Over the dongle
-backlight modes (`light`, `brightness`, `off`), per-key RGB (`perkey`), and
-clock sync (`clock`) work, including from the GUI; remapping and LCD upload
-need the cable. The hidraw node must be writable by your user:
+backlight modes (`light`, `brightness`, `off`), per-key RGB (`perkey`), clock
+sync (`clock`), and key remapping (`remap`) work, including from the GUI.
+`f108-pro battery` shows the battery level (dongle only). LCD upload (`lcd`) is
+implemented over the dongle but untested, and takes about 45 seconds per frame.
+See [ai-docs/hid-protocol.md](ai-docs/hid-protocol.md#24g-wireless-protocol)
+for the protocol. The hidraw node must be writable by your user:
 
 ```bash
 echo 'SUBSYSTEM=="hidraw", ATTRS{idVendor}=="05ac", ATTRS{idProduct}=="024f", MODE="0666"' \

@@ -38,8 +38,8 @@ type wirelessTransport interface {
 
 // sendWireless fills in the checksum (last byte = sum of all bytes), sends
 // the report, and waits for the keyboard to echo its first three bytes.
-// Mirrors FUN_0044f4e0 in the official software.
-func (d *Device) sendWireless(report [wirelessReportSize]byte) error {
+// Returns the acknowledgment. Mirrors FUN_0044f4e0 in the official software.
+func (d *Device) sendWireless(report [wirelessReportSize]byte) ([wirelessReportSize]byte, error) {
 	var sum byte
 	for _, b := range report[:wirelessReportSize-1] {
 		sum += b
@@ -47,19 +47,39 @@ func (d *Device) sendWireless(report [wirelessReportSize]byte) error {
 	report[wirelessReportSize-1] = sum
 
 	if err := d.wireless.WriteReport(report); err != nil {
-		return err
+		return report, err
 	}
 
 	for i := 0; i < wirelessAckTries; i++ {
 		ack, err := d.wireless.ReadReport()
 		if err != nil {
-			return fmt.Errorf("no acknowledgment (is the keyboard on and in 2.4G mode?): %w", err)
+			return ack, fmt.Errorf("no acknowledgment (is the keyboard on and in 2.4G mode?): %w", err)
 		}
 		if ack[0] == report[0] && ack[1] == report[1] && ack[2] == report[2] {
-			return nil
+			return ack, nil
 		}
 	}
-	return fmt.Errorf("no matching acknowledgment for command % x", report[:3])
+	return report, fmt.Errorf("no matching acknowledgment for command % x", report[:3])
+}
+
+// sendWirelessChunks sends buf as 28-byte chunks (cmd <len> <index> <data>)
+// with a 2 ms pause, as used for per-key colors and key remaps.
+func (d *Device) sendWirelessChunks(cmd byte, buf []byte) error {
+	nChunks := (len(buf) + wirelessChunkSize - 1) / wirelessChunkSize
+	for i := 0; i < nChunks; i++ {
+		chunk := buf[i*wirelessChunkSize : min((i+1)*wirelessChunkSize, len(buf))]
+
+		var report [wirelessReportSize]byte
+		report[0] = cmd
+		report[1] = byte(len(chunk))
+		report[2] = byte(i)
+		copy(report[3:], chunk)
+		if _, err := d.sendWireless(report); err != nil {
+			return fmt.Errorf("chunk %d/%d: %w", i+1, nChunks, err)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	return nil
 }
 
 // setLightingWireless sends the 2.4G all-in-one lighting packet (05 10).
@@ -89,11 +109,12 @@ func (d *Device) setLightingWireless(cfg LightingConfig) error {
 	report[17] = 0xAA
 	report[18] = 0x55
 
-	return d.sendWireless(report)
+	_, err := d.sendWireless(report)
+	return err
 }
 
 // syncClockWireless sends the 2.4G clock packet (0C 10). Same fields as the
-// USB clock data packet, shifted by 4 bytes. Mirrors FUN_00423c40.
+// USB clock data packet, shifted by 3 bytes. Mirrors FUN_00423c40.
 func (d *Device) syncClockWireless(t time.Time) error {
 	var report [wirelessReportSize]byte
 	report[0] = 0x0C
@@ -110,30 +131,79 @@ func (d *Device) syncClockWireless(t time.Time) error {
 	report[17] = 0xAA
 	report[18] = 0x55
 
-	return d.sendWireless(report)
+	_, err := d.sendWireless(report)
+	return err
 }
 
 // setPerKeyRGBWireless switches to the per-key mode (0x80) with the given
-// brightness, then sends the 576-byte color buffer as 28-byte chunks
-// (14 <len> <index> <data>). Mirrors FUN_0044bd80.
+// brightness, then sends the 576-byte color buffer as 14-chunks.
+// Mirrors FUN_0044bd80.
 func (d *Device) setPerKeyRGBWireless(buf []byte, brightness uint8) error {
 	if err := d.setLightingWireless(LightingConfig{Mode: 0x80, Brightness: brightness}); err != nil {
 		return fmt.Errorf("per-key mode: %w", err)
 	}
+	return d.sendWirelessChunks(0x14, buf)
+}
 
-	nChunks := (len(buf) + wirelessChunkSize - 1) / wirelessChunkSize
+// uploadLCDWireless sends an LCD image over the dongle. Unlike USB, the
+// buffer is not padded to 4096 bytes: only header + frames are sent, as
+// 28-byte chunks with a 24-bit index. Mirrors FUN_004233f0.
+func (d *Device) uploadLCDWireless(buf []byte, imageNumber uint8, progress func(sent, total int)) error {
+	size := lcdHeaderSize + int(buf[0])*lcdFrameSize
+	if buf[0] == 0 || size > len(buf) {
+		return fmt.Errorf("invalid frame count %d for a %d-byte buffer", buf[0], len(buf))
+	}
+	data := buf[:size]
+	nChunks := (size + wirelessChunkSize - 1) / wirelessChunkSize
+
+	// Header: 7F 03 00 <image> <chunk count, 24-bit LE>.
+	var hdr [wirelessReportSize]byte
+	hdr[0] = 0x7F
+	hdr[1] = 0x03
+	hdr[3] = imageNumber
+	hdr[4] = byte(nChunks)
+	hdr[5] = byte(nChunks >> 8)
+	hdr[6] = byte(nChunks >> 16)
+	if _, err := d.sendWireless(hdr); err != nil {
+		return fmt.Errorf("image header: %w", err)
+	}
+
 	for i := 0; i < nChunks; i++ {
-		chunk := buf[i*wirelessChunkSize : min((i+1)*wirelessChunkSize, len(buf))]
-
 		var report [wirelessReportSize]byte
-		report[0] = 0x14
-		report[1] = byte(len(chunk))
-		report[2] = byte(i)
-		copy(report[3:], chunk)
-		if err := d.sendWireless(report); err != nil {
+		report[0] = 0x80 | byte(i>>16)
+		report[1] = byte(i)
+		report[2] = byte(i >> 8)
+		// The last chunk is padded with 0xFF, like the official buffer.
+		chunk := data[i*wirelessChunkSize : min((i+1)*wirelessChunkSize, size)]
+		for j := copy(report[3:], chunk); j < wirelessChunkSize; j++ {
+			report[3+j] = 0xFF
+		}
+		if _, err := d.sendWireless(report); err != nil {
 			return fmt.Errorf("chunk %d/%d: %w", i+1, nChunks, err)
 		}
 		time.Sleep(2 * time.Millisecond)
+		if progress != nil {
+			progress(i+1, nChunks)
+		}
 	}
 	return nil
+}
+
+// Battery returns the battery level in percent (20 01 query, level in byte 3
+// of the reply). Only available over the dongle. Mirrors FUN_004357d0.
+func (d *Device) Battery() (int, error) {
+	if d.wireless == nil {
+		return 0, errors.New("battery level is only available over the 2.4G dongle")
+	}
+	var report [wirelessReportSize]byte
+	report[0] = 0x20
+	report[1] = 0x01
+	ack, err := d.sendWireless(report)
+	if err != nil {
+		return 0, err
+	}
+	if ack[3] == 0 {
+		return 0, errors.New("keyboard did not report a battery level")
+	}
+	return min(int(ack[3]), 100), nil
 }
