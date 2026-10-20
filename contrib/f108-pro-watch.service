@@ -1,5 +1,5 @@
 [Unit]
-Description=Aula F108 Pro: sync LCD clock when the keyboard connects
+Description=Aula F108 Pro: sync LCD clock on connect, color the F-row per layout
 
 [Service]
 ExecStart=%h/.local/bin/f108-pro watch

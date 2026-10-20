@@ -27,7 +27,7 @@ var CLI struct {
 	Remap      RemapCmd      `cmd:"" help:"Remap keys (supports key swap, media, mouse, combos)."`
 	GUI        GUICmd        `cmd:"" name:"gui" help:"Start a local web GUI in the browser."`
 	Battery    BatteryCmd    `cmd:"" help:"Show battery level (2.4G dongle only)."`
-	Watch      WatchCmd      `cmd:"" help:"Sync the LCD clock whenever the keyboard connects or switches mode."`
+	Watch      WatchCmd      `cmd:"" help:"Sync the LCD clock on connect and color the F-row per layout (D-Bus)."`
 }
 
 func main() {

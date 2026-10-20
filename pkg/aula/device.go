@@ -29,20 +29,27 @@ const (
 type Device struct {
 	transport Transport
 	wireless  wirelessTransport
+	unlock    func()
 }
 
 // Open finds and opens the Aula F108 Pro keyboard. It prefers the USB cable
-// and falls back to the 2.4G dongle.
+// and falls back to the 2.4G dongle. Only one process has the keyboard open
+// at a time; Open waits until Close is called by the other one.
 func Open() (*Device, error) {
+	unlock, err := lockDevice()
+	if err != nil {
+		return nil, err
+	}
 	t, err := openTransport()
 	if err == nil {
-		return &Device{transport: t}, nil
+		return &Device{transport: t, unlock: unlock}, nil
 	}
 	w, werr := openWirelessTransport()
 	if werr != nil {
+		unlock()
 		return nil, fmt.Errorf("%w; %v", err, werr)
 	}
-	return &Device{wireless: w}, nil
+	return &Device{wireless: w, unlock: unlock}, nil
 }
 
 // Wireless reports whether the keyboard is connected through the 2.4G dongle.
@@ -57,6 +64,9 @@ func (d *Device) Close() {
 	}
 	if d.wireless != nil {
 		d.wireless.Close()
+	}
+	if d.unlock != nil {
+		d.unlock()
 	}
 }
 

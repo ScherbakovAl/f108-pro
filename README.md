@@ -133,6 +133,26 @@ take up to 15 seconds to come back after switching to 2.4G.
 After rebuilding the tool, reinstall it and run
 `systemctl --user restart f108-pro-watch`.
 
+#### 5. F-row color per keyboard layout
+`f108-pro watch` also colors F1-F12 on request over D-Bus, so you can see the
+active layout on the keyboard. The
+[panel-layout-color](https://github.com/ScherbakovAl/panel-layout-color) GNOME
+extension calls it with the panel color of the current input source. To try it
+by hand:
+
+```bash
+busctl --user call io.github.scherbakoval.F108Pro /io/github/scherbakoval/F108Pro \
+    io.github.scherbakoval.F108Pro SetFRowColor s 'rgb(0,255,0)'  # or '#00ff00'
+busctl --user call io.github.scherbakoval.F108Pro /io/github/scherbakoval/F108Pro \
+    io.github.scherbakoval.F108Pro SetFRowColor s ''              # keyboard's own
+```
+
+The colors are sent as realtime frames (`04 20`), which the keyboard keeps in
+RAM only: nothing is written to flash, and the other keys keep their own
+lighting. The keyboard drops a frame after 5 seconds, so the service resends
+it every 2.5 seconds. While the F-row is colored, animated effects pause. USB
+only for now.
+
 #### New computer or reinstall
 System updates keep all of the above: `/etc` and your home directory survive,
 and the initramfs is rebuilt with the `hid_apple` option on every kernel update.
