@@ -110,6 +110,34 @@ If you want to follow along and let (A)I reverse the binary.
 
 ## Usage
 
+### Web GUI
+
+```bash
+f108-pro gui
+```
+
+Starts a local server on `http://127.0.0.1:8108` and opens it in the browser.
+Keep the terminal open while using the page. Do not open `gui/index.html`
+directly from disk: the page talks to the keyboard through the server's
+`/api/...` endpoints and will not work over `file://`.
+
+* `--addr`: Listen address (default `127.0.0.1:8108`).
+* `--no-browser`: Do not open the browser automatically.
+
+### 2.4G Dongle (Linux only)
+If the keyboard is not connected with a USB cable, the tool falls back to the
+2.4G dongle (`05ac:024f`, via `/dev/hidrawN` of interface 3). Over the dongle
+only backlight mode commands (`light`, `brightness`, `off`, and the GUI
+backlight controls) work; per-key RGB, remapping, clock sync, and LCD upload
+need the cable. The hidraw node must be writable by your user:
+
+```bash
+echo 'SUBSYSTEM=="hidraw", ATTRS{idVendor}=="05ac", ATTRS{idProduct}=="024f", MODE="0666"' \
+  | sudo tee /etc/udev/rules.d/99-aula-dongle.rules
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+```
+
 ### Backlight Mode
 
 ```bash

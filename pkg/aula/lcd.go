@@ -29,6 +29,9 @@ func (d *Device) UploadLCDImage(buf []byte, imageNumber uint8, progress func(sen
 		return fmt.Errorf("buffer size %d is not a positive multiple of %d", len(buf), lcdPageSize)
 	}
 
+	if d.transport == nil {
+		return ErrWirelessUnsupported
+	}
 	if err := d.transport.InitLCD(); err != nil {
 		return fmt.Errorf("LCD init: %w", err)
 	}

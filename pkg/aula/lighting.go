@@ -77,6 +77,10 @@ func (d *Device) SetLighting(cfg LightingConfig) error {
 		return fmt.Errorf("invalid speed %d (valid range: 0-5)", cfg.Speed)
 	}
 
+	if d.wireless != nil {
+		return d.setLightingWireless(cfg)
+	}
+
 	// Step 1: Begin transaction.
 	if err := d.beginTransaction(); err != nil {
 		return fmt.Errorf("begin: %w", err)

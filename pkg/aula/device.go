@@ -25,17 +25,29 @@ const (
 )
 
 // Device represents an open connection to an Aula F108 Pro keyboard.
+// Exactly one of transport (USB) and wireless (2.4G dongle) is set.
 type Device struct {
 	transport Transport
+	wireless  wirelessTransport
 }
 
-// Open finds and opens the Aula F108 Pro keyboard.
+// Open finds and opens the Aula F108 Pro keyboard. It prefers the USB cable
+// and falls back to the 2.4G dongle.
 func Open() (*Device, error) {
 	t, err := openTransport()
-	if err != nil {
-		return nil, err
+	if err == nil {
+		return &Device{transport: t}, nil
 	}
-	return &Device{transport: t}, nil
+	w, werr := openWirelessTransport()
+	if werr != nil {
+		return nil, fmt.Errorf("%w; %v", err, werr)
+	}
+	return &Device{wireless: w}, nil
+}
+
+// Wireless reports whether the keyboard is connected through the 2.4G dongle.
+func (d *Device) Wireless() bool {
+	return d.wireless != nil
 }
 
 // Close releases the device and all resources.
@@ -43,15 +55,24 @@ func (d *Device) Close() {
 	if d.transport != nil {
 		d.transport.Close()
 	}
+	if d.wireless != nil {
+		d.wireless.Close()
+	}
 }
 
 // setFeatureReport sends a 64-byte HID feature report to the keyboard.
 func (d *Device) setFeatureReport(data [reportSize]byte) error {
+	if d.transport == nil {
+		return ErrWirelessUnsupported
+	}
 	return d.transport.SetFeatureReport(data)
 }
 
 // getFeatureReport reads a 64-byte HID feature report from the keyboard.
 func (d *Device) getFeatureReport() ([reportSize]byte, error) {
+	if d.transport == nil {
+		return [reportSize]byte{}, ErrWirelessUnsupported
+	}
 	return d.transport.GetFeatureReport()
 }
 
