@@ -188,6 +188,14 @@ func (d *Device) SetPerKeyRGB(keys []KeyColor, brightness uint8) error {
 		brightness = 5
 	}
 
+	if d.wireless != nil {
+		buf := perKeyRGBBuffer(keys)
+		// The official software writes the trailer as word 0x55AA, little-endian.
+		buf[perKeyRGBSize-2] = 0xAA
+		buf[perKeyRGBSize-1] = 0x55
+		return d.setPerKeyRGBWireless(buf, brightness)
+	}
+
 	// Step 1: LED strip setup preamble.
 	if err := d.ledStripSetup(brightness); err != nil {
 		return fmt.Errorf("LED strip setup: %w", err)
@@ -208,22 +216,7 @@ func (d *Device) SetPerKeyRGB(keys []KeyColor, brightness uint8) error {
 	}
 
 	// Step 4: Build and send RGB data buffer (576 bytes).
-	buf := make([]byte, perKeyRGBSize)
-	for _, kc := range keys {
-		idx := int(kc.LightIndex)
-		if idx <= 0 || idx*4+3 >= perKeyRGBSize-2 {
-			continue // Skip invalid indices (0 is unused, avoid trailer area).
-		}
-		off := idx * 4
-		buf[off] = kc.LightIndex
-		buf[off+1] = kc.R
-		buf[off+2] = kc.G
-		buf[off+3] = kc.B
-	}
-	// Trailer 0x55AA at the last two bytes.
-	buf[perKeyRGBSize-2] = 0x55
-	buf[perKeyRGBSize-1] = 0xAA
-
+	buf := perKeyRGBBuffer(keys)
 	if err := d.sendMultiPacket(buf, true); err != nil {
 		return fmt.Errorf("perkey data: %w", err)
 	}
@@ -239,6 +232,27 @@ func (d *Device) SetPerKeyRGB(keys []KeyColor, brightness uint8) error {
 	}
 
 	return nil
+}
+
+// perKeyRGBBuffer builds the 576-byte per-key buffer: 4 bytes per slot
+// (index, R, G, B) at offset index*4, trailer 0x55AA at the end.
+func perKeyRGBBuffer(keys []KeyColor) []byte {
+	buf := make([]byte, perKeyRGBSize)
+	for _, kc := range keys {
+		idx := int(kc.LightIndex)
+		if idx <= 0 || idx*4+3 >= perKeyRGBSize-2 {
+			continue // Skip invalid indices (0 is unused, avoid trailer area).
+		}
+		off := idx * 4
+		buf[off] = kc.LightIndex
+		buf[off+1] = kc.R
+		buf[off+2] = kc.G
+		buf[off+3] = kc.B
+	}
+	// Trailer 0x55AA at the last two bytes.
+	buf[perKeyRGBSize-2] = 0x55
+	buf[perKeyRGBSize-1] = 0xAA
+	return buf
 }
 
 // ledStripSetup sends the LED strip preamble required before per-key RGB data.

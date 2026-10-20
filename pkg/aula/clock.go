@@ -10,6 +10,10 @@ import (
 //
 // dev.SyncClock(time.Now())
 func (d *Device) SyncClock(t time.Time) error {
+	if d.wireless != nil {
+		return d.syncClockWireless(t)
+	}
+
 	// Step 1: Begin.
 	if err := d.beginTransaction(); err != nil {
 		return fmt.Errorf("begin: %w", err)

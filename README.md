@@ -127,8 +127,8 @@ directly from disk: the page talks to the keyboard through the server's
 ### 2.4G Dongle (Linux only)
 If the keyboard is not connected with a USB cable, the tool falls back to the
 2.4G dongle (`05ac:024f`, via `/dev/hidrawN` of interface 3). Over the dongle
-only backlight mode commands (`light`, `brightness`, `off`, and the GUI
-backlight controls) work; per-key RGB, remapping, clock sync, and LCD upload
+backlight modes (`light`, `brightness`, `off`), per-key RGB (`perkey`), and
+clock sync (`clock`) work, including from the GUI; remapping and LCD upload
 need the cable. The hidraw node must be writable by your user:
 
 ```bash
