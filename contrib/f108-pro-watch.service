@@ -1,0 +1,10 @@
+[Unit]
+Description=Aula F108 Pro: sync LCD clock when the keyboard connects
+
+[Service]
+ExecStart=%h/.local/bin/f108-pro watch
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

@@ -39,6 +39,9 @@ type wirelessTransport interface {
 // sendWireless fills in the checksum (last byte = sum of all bytes), sends
 // the report, and waits for the keyboard to echo its first three bytes.
 // Returns the acknowledgment. Mirrors FUN_0044f4e0 in the official software.
+//
+// A keyboard that has been idle can miss the first report, so it is resent
+// once without an acknowledgment. All 2.4G commands are idempotent.
 func (d *Device) sendWireless(report [wirelessReportSize]byte) ([wirelessReportSize]byte, error) {
 	var sum byte
 	for _, b := range report[:wirelessReportSize-1] {
@@ -46,10 +49,22 @@ func (d *Device) sendWireless(report [wirelessReportSize]byte) ([wirelessReportS
 	}
 	report[wirelessReportSize-1] = sum
 
-	if err := d.wireless.WriteReport(report); err != nil {
-		return report, err
+	var err error
+	for attempt := 0; attempt < 2; attempt++ {
+		if err = d.wireless.WriteReport(report); err != nil {
+			return report, err
+		}
+		var ack [wirelessReportSize]byte
+		if ack, err = d.waitWirelessAck(report); err == nil {
+			return ack, nil
+		}
 	}
+	return report, err
+}
 
+// waitWirelessAck reads reports until one echoes the command's first three
+// bytes.
+func (d *Device) waitWirelessAck(report [wirelessReportSize]byte) ([wirelessReportSize]byte, error) {
 	for i := 0; i < wirelessAckTries; i++ {
 		ack, err := d.wireless.ReadReport()
 		if err != nil {

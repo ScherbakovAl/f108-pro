@@ -5,8 +5,6 @@ package aula
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -17,38 +15,15 @@ type hidrawTransport struct {
 }
 
 func openWirelessTransport() (wirelessTransport, error) {
-	path, err := findDongleHidraw()
+	path, err := findHidraw(DongleVendorID, DongleProductID, DongleInterfaceID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("2.4G dongle: %w", err)
 	}
 	f, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
 		return nil, fmt.Errorf("opening %s: %w", path, err)
 	}
 	return &hidrawTransport{f: f}, nil
-}
-
-// findDongleHidraw returns the hidraw node for the dongle's interface 3.
-func findDongleHidraw() (string, error) {
-	hidID := fmt.Sprintf("HID_ID=0003:%08X:%08X", DongleVendorID, DongleProductID)
-	intfSuffix := fmt.Sprintf(":1.%d", DongleInterfaceID)
-
-	nodes, _ := filepath.Glob("/sys/class/hidraw/hidraw*")
-	for _, node := range nodes {
-		uevent, err := os.ReadFile(filepath.Join(node, "device", "uevent"))
-		if err != nil || !strings.Contains(string(uevent), hidID) {
-			continue
-		}
-		hidDev, err := filepath.EvalSymlinks(filepath.Join(node, "device"))
-		if err != nil {
-			continue
-		}
-		// The HID device's parent is the USB interface, e.g. 3-7:1.3.
-		if strings.HasSuffix(filepath.Base(filepath.Dir(hidDev)), intfSuffix) {
-			return "/dev/" + filepath.Base(node), nil
-		}
-	}
-	return "", fmt.Errorf("2.4G dongle not found (VID=%04x PID=%04x)", DongleVendorID, DongleProductID)
 }
 
 func (t *hidrawTransport) WriteReport(data [wirelessReportSize]byte) error {

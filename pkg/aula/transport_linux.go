@@ -3,152 +3,131 @@
 package aula
 
 import (
-	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"syscall"
 	"time"
-
-	"github.com/google/gousb"
+	"unsafe"
 )
 
-// goUSBTransport implements Transport using gousb (libusb).
-type goUSBTransport struct {
-	ctx  *gousb.Context
-	dev  *gousb.Device
-	cfg  *gousb.Config
-	intf *gousb.Interface
-
-	// LCD interface 2 — claimed lazily.
-	lcdIntf *gousb.Interface
-	lcdOut  *gousb.OutEndpoint
-	lcdIn   *gousb.InEndpoint
+// hidrawUSBTransport implements Transport using /dev/hidrawN nodes. Unlike
+// libusb, hidraw does not detach the kernel driver, so the keyboard keeps
+// typing while (and after) the tool talks to it.
+type hidrawUSBTransport struct {
+	cfg *os.File // Interface 3: feature reports.
+	lcd *os.File // Interface 2: LCD data, opened lazily.
 }
 
 func openTransport() (Transport, error) {
-	ctx := gousb.NewContext()
-
-	dev, err := ctx.OpenDeviceWithVIDPID(VendorID, ProductID)
+	path, err := findHidraw(VendorID, ProductID, InterfaceID)
 	if err != nil {
-		ctx.Close()
-		return nil, fmt.Errorf("opening device: %w", err)
+		return nil, err
 	}
-	if dev == nil {
-		ctx.Close()
-		return nil, fmt.Errorf("keyboard not found (VID=%04x PID=%04x)", VendorID, ProductID)
-	}
-
-	if err := dev.SetAutoDetach(true); err != nil {
-		dev.Close()
-		ctx.Close()
-		return nil, fmt.Errorf("setting auto-detach: %w", err)
-	}
-
-	cfg, err := dev.Config(1)
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
-		dev.Close()
-		ctx.Close()
-		return nil, fmt.Errorf("getting config: %w", err)
+		return nil, fmt.Errorf("opening %s: %w", path, err)
 	}
-
-	intf, err := cfg.Interface(InterfaceID, 0)
-	if err != nil {
-		cfg.Close()
-		dev.Close()
-		ctx.Close()
-		return nil, fmt.Errorf("claiming interface %d: %w", InterfaceID, err)
-	}
-
-	return &goUSBTransport{
-		ctx:  ctx,
-		dev:  dev,
-		cfg:  cfg,
-		intf: intf,
-	}, nil
+	return &hidrawUSBTransport{cfg: f}, nil
 }
 
-func (t *goUSBTransport) SetFeatureReport(data [reportSize]byte) error {
-	_, err := t.dev.Control(
-		reqTypeOut,
-		reqSetReport,
-		featureReportType,
-		uint16(InterfaceID),
-		data[:],
-	)
-	if err != nil {
+// findHidraw returns the hidraw node for the given USB interface.
+func findHidraw(vid, pid uint16, intf int) (string, error) {
+	hidID := fmt.Sprintf("HID_ID=0003:%08X:%08X", vid, pid)
+	intfSuffix := fmt.Sprintf(":1.%d", intf)
+
+	nodes, _ := filepath.Glob("/sys/class/hidraw/hidraw*")
+	for _, node := range nodes {
+		uevent, err := os.ReadFile(filepath.Join(node, "device", "uevent"))
+		if err != nil || !strings.Contains(string(uevent), hidID) {
+			continue
+		}
+		hidDev, err := filepath.EvalSymlinks(filepath.Join(node, "device"))
+		if err != nil {
+			continue
+		}
+		// The HID device's parent is the USB interface, e.g. 3-7:1.3.
+		if strings.HasSuffix(filepath.Base(filepath.Dir(hidDev)), intfSuffix) {
+			return "/dev/" + filepath.Base(node), nil
+		}
+	}
+	return "", fmt.Errorf("device not found (VID=%04x PID=%04x interface %d)", vid, pid, intf)
+}
+
+// hidiocFeature builds HIDIOCSFEATURE (nr 6) / HIDIOCGFEATURE (nr 7) for a
+// buffer of the given length: _IOC(_IOC_READ|_IOC_WRITE, 'H', nr, len).
+func hidiocFeature(nr, length uintptr) uintptr {
+	return 3<<30 | length<<16 | 'H'<<8 | nr
+}
+
+// featureIoctl runs a feature report ioctl. buf[0] is the report ID (0);
+// the kernel strips it for devices without numbered reports.
+func featureIoctl(f *os.File, nr uintptr, buf []byte) error {
+	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(),
+		hidiocFeature(nr, uintptr(len(buf))), uintptr(unsafe.Pointer(&buf[0])))
+	if errno != 0 {
+		return errno
+	}
+	return nil
+}
+
+func (t *hidrawUSBTransport) SetFeatureReport(data [reportSize]byte) error {
+	buf := make([]byte, 1+reportSize)
+	copy(buf[1:], data[:])
+	if err := featureIoctl(t.cfg, 6, buf); err != nil {
 		return fmt.Errorf("SET_REPORT: %w", err)
 	}
 	return nil
 }
 
-func (t *goUSBTransport) GetFeatureReport() ([reportSize]byte, error) {
-	var buf [reportSize]byte
-	_, err := t.dev.Control(
-		reqTypeIn,
-		reqGetReport,
-		featureReportType,
-		uint16(InterfaceID),
-		buf[:],
-	)
-	if err != nil {
-		return buf, fmt.Errorf("GET_REPORT: %w", err)
+func (t *hidrawUSBTransport) GetFeatureReport() ([reportSize]byte, error) {
+	var report [reportSize]byte
+	buf := make([]byte, 1+reportSize)
+	if err := featureIoctl(t.cfg, 7, buf); err != nil {
+		return report, fmt.Errorf("GET_REPORT: %w", err)
 	}
-	return buf, nil
+	copy(report[:], buf[1:])
+	return report, nil
 }
 
-func (t *goUSBTransport) InitLCD() error {
-	if t.lcdOut != nil {
+func (t *hidrawUSBTransport) InitLCD() error {
+	if t.lcd != nil {
 		return nil
 	}
-
-	intf, err := t.cfg.Interface(lcdInterfaceID, 0)
+	path, err := findHidraw(VendorID, ProductID, lcdInterfaceID)
 	if err != nil {
-		return fmt.Errorf("claiming interface %d: %w", lcdInterfaceID, err)
+		return err
 	}
-
-	outEP, err := intf.OutEndpoint(lcdOutEP)
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
-		intf.Close()
-		return fmt.Errorf("OUT endpoint %d: %w", lcdOutEP, err)
+		return fmt.Errorf("opening %s: %w", path, err)
 	}
-
-	inEP, err := intf.InEndpoint(lcdInEP)
-	if err != nil {
-		intf.Close()
-		return fmt.Errorf("IN endpoint %d: %w", lcdInEP, err)
-	}
-
-	t.lcdIntf = intf
-	t.lcdOut = outEP
-	t.lcdIn = inEP
+	t.lcd = f
 	return nil
 }
 
-func (t *goUSBTransport) WriteLCDPage(data []byte) error {
-	_, err := t.lcdOut.Write(data)
+// WriteLCDPage sends a 4096-byte output report. The kernel uses the
+// interrupt OUT endpoint, as the official software does with WriteFile.
+func (t *hidrawUSBTransport) WriteLCDPage(data []byte) error {
+	buf := make([]byte, 1+len(data))
+	copy(buf[1:], data)
+	_, err := t.lcd.Write(buf)
 	return err
 }
 
-func (t *goUSBTransport) ReadLCDAck() ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
-	defer cancel()
+func (t *hidrawUSBTransport) ReadLCDAck() ([]byte, error) {
 	buf := make([]byte, 64)
-	_, err := t.lcdIn.ReadContext(ctx, buf)
+	if err := t.lcd.SetReadDeadline(time.Now().Add(300 * time.Millisecond)); err != nil {
+		return buf, err
+	}
+	_, err := t.lcd.Read(buf)
 	return buf, err
 }
 
-func (t *goUSBTransport) Close() {
-	if t.lcdIntf != nil {
-		t.lcdIntf.Close()
+func (t *hidrawUSBTransport) Close() {
+	if t.lcd != nil {
+		t.lcd.Close()
 	}
-	if t.intf != nil {
-		t.intf.Close()
-	}
-	if t.cfg != nil {
-		t.cfg.Close()
-	}
-	if t.dev != nil {
-		t.dev.Close()
-	}
-	if t.ctx != nil {
-		t.ctx.Close()
-	}
+	t.cfg.Close()
 }

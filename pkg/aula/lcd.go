@@ -7,8 +7,6 @@ import (
 
 const (
 	lcdInterfaceID = 2  // Interface 2: LCD data (usage page 0xFF68).
-	lcdOutEP       = 3  // EP 3 OUT: interrupt OUT for data pages.
-	lcdInEP        = 4  // EP 4 IN: interrupt IN for acknowledgments.
 	lcdPageSize    = 4096
 	lcdHeaderSize  = 256
 	lcdFrameSize   = 240 * 135 * 2 // RGB565.

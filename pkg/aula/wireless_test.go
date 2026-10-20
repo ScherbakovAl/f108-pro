@@ -2,15 +2,18 @@ package aula
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 	"time"
 )
 
 // fakeDongle records sent reports and acknowledges each by echoing it.
 // A battery query (20 01) is answered with the battery level in byte 3.
+// If dropFirst is set, the first read times out, like an idle keyboard.
 type fakeDongle struct {
-	sent    [][wirelessReportSize]byte
-	battery byte
+	sent      [][wirelessReportSize]byte
+	battery   byte
+	dropFirst bool
 }
 
 func (f *fakeDongle) WriteReport(data [wirelessReportSize]byte) error {
@@ -19,6 +22,10 @@ func (f *fakeDongle) WriteReport(data [wirelessReportSize]byte) error {
 }
 
 func (f *fakeDongle) ReadReport() ([wirelessReportSize]byte, error) {
+	if f.dropFirst {
+		f.dropFirst = false
+		return [wirelessReportSize]byte{}, errors.New("i/o timeout")
+	}
 	ack := f.sent[len(f.sent)-1]
 	if ack[0] == 0x20 {
 		ack[3] = f.battery
@@ -161,5 +168,17 @@ func TestWirelessBattery(t *testing.T) {
 	level, err := d.Battery()
 	if err != nil || level != 87 {
 		t.Errorf("Battery() = %d, %v; want 87", level, err)
+	}
+}
+
+func TestWirelessResendOnTimeout(t *testing.T) {
+	f := &fakeDongle{battery: 50, dropFirst: true}
+	d := &Device{wireless: f}
+	level, err := d.Battery()
+	if err != nil || level != 50 {
+		t.Errorf("Battery() = %d, %v; want 50", level, err)
+	}
+	if len(f.sent) != 2 {
+		t.Errorf("sent %d reports, want 2 (one resend)", len(f.sent))
 	}
 }

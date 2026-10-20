@@ -66,27 +66,84 @@ usbipd detach --busid <BUSID>
 Build is the same as native Linux: `go build .`
 
 ### Linux
-**Linux instructions are untested and might be LLM hallucinations.**
-Requires libusb development headers.
+Tested on Fedora 44 (kernel 7.2) over USB and the 2.4G dongle. The tool talks
+to the keyboard through `/dev/hidrawN`, so it does not need libusb and does not
+detach the kernel driver: the keyboard keeps typing while the tool runs. (The
+WSL2 instructions above use libusb device nodes and have not been re-tested
+with hidraw.)
+
+#### 1. Permissions
+Give the logged-in user access to the keyboard's and the dongle's hidraw nodes.
+The file name must sort before `73-seat-late.rules` for `uaccess` to work.
 
 ```bash
-sudo apt-get install -y libusb-1.0-0-dev pkg-config
-```
-
-Set up USB permissions (so you don't need root):
-
-```bash
-echo 'SUBSYSTEM=="usb", ATTR{idVendor}=="0c45", ATTR{idProduct}=="800a", MODE="0666"' \
-  | sudo tee /etc/udev/rules.d/99-aula.rules
+sudo tee /etc/udev/rules.d/70-aula-f108pro.rules <<'EOF'
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0c45", ATTRS{idProduct}=="800a", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="05ac", ATTRS{idProduct}=="024f", TAG+="uaccess"
+EOF
 sudo udevadm control --reload-rules
 sudo udevadm trigger
 ```
 
-Build:
+#### 2. F1-F12 over the dongle
+The dongle spoofs Apple's Aluminium Keyboard (`05ac:024f`), so Linux binds the
+`hid-apple` driver, which turns the F-row into media keys like on a Mac. Over
+the cable and on Windows the F-keys work normally. Turn the Apple Fn handling
+off (the keyboard handles its own Fn key in firmware, so nothing is lost):
 
 ```bash
-go build .
+echo "options hid_apple fnmode=0" | sudo tee /etc/modprobe.d/hid_apple.conf
+sudo dracut -f   # Fedora; rebuilds the initramfs. Debian/Ubuntu: sudo update-initramfs -u
 ```
+
+Reboot, or apply it right away with
+`echo 0 | sudo tee /sys/module/hid_apple/parameters/fnmode`. This also affects
+real Apple keyboards.
+
+#### 3. Build and install
+
+```bash
+go build -o ~/.local/bin/f108-pro .
+```
+
+#### 4. Automatic LCD clock sync
+Switching connection modes (FN + ~ / 1-4) resets the LCD to the settings menu.
+On Windows the official software immediately sends a clock sync, which also
+restores the selected screen; on Linux nothing does. `f108-pro watch` does the
+same: it syncs the clock whenever the keyboard connects or switches between USB
+and 2.4G (Bluetooth is not supported). Run it as a systemd user service:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp contrib/f108-pro-watch.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now f108-pro-watch
+journalctl --user -u f108-pro-watch -f   # log
+```
+
+Over USB it only checks that the keyboard is present. Over the dongle it sends
+a battery query every 15 seconds, like the official software, because the
+dongle stays plugged in when the keyboard switches modes. So the screen can
+take up to 15 seconds to come back after switching to 2.4G.
+
+After rebuilding the tool, reinstall it and run
+`systemctl --user restart f108-pro-watch`.
+
+#### New computer or reinstall
+System updates keep all of the above: `/etc` and your home directory survive,
+and the initramfs is rebuilt with the `hid_apple` option on every kernel update.
+On a new computer or after a fresh install, install Go, clone your fork, and
+run the setup script. It does steps 1-4 and is safe to re-run:
+
+```bash
+git clone https://github.com/<you>/f108-pro.git
+cd f108-pro
+contrib/install-linux.sh
+```
+
+Lighting, per-key colors, and remaps are stored on the keyboard itself and do
+not need restoring. GUI presets live in `~/.config/f108-pro/presets.json`;
+back that file up if you want to keep them.
 
 ### Ghidra MCP
 If you want to follow along and let (A)I reverse the binary.
@@ -132,14 +189,7 @@ sync (`clock`), and key remapping (`remap`) work, including from the GUI.
 `f108-pro battery` shows the battery level (dongle only). LCD upload (`lcd`) is
 implemented over the dongle but untested, and takes about 45 seconds per frame.
 See [ai-docs/hid-protocol.md](ai-docs/hid-protocol.md#24g-wireless-protocol)
-for the protocol. The hidraw node must be writable by your user:
-
-```bash
-echo 'SUBSYSTEM=="hidraw", ATTRS{idVendor}=="05ac", ATTRS{idProduct}=="024f", MODE="0666"' \
-  | sudo tee /etc/udev/rules.d/99-aula-dongle.rules
-sudo udevadm control --reload-rules
-sudo udevadm trigger
-```
+for the protocol. See [Linux](#linux) for permissions and the F-key fix.
 
 ### Backlight Mode
 
