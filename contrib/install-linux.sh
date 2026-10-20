@@ -18,7 +18,8 @@ if [ -e /sys/module/hid_apple/parameters/fnmode ]; then # Apply now, without a r
 	echo 0 | sudo tee /sys/module/hid_apple/parameters/fnmode >/dev/null
 fi
 if command -v dracut >/dev/null; then
-	sudo dracut -f
+	echo "Rebuilding the initramfs, this takes 1-3 minutes. Do not interrupt it."
+	sudo dracut -f --verbose 2>&1 | sed -nu 's/.*\(Including module: .*\)/  \1/p'
 elif command -v update-initramfs >/dev/null; then
 	sudo update-initramfs -u
 fi

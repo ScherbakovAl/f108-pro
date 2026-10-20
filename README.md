@@ -93,8 +93,12 @@ off (the keyboard handles its own Fn key in firmware, so nothing is lost):
 
 ```bash
 echo "options hid_apple fnmode=0" | sudo tee /etc/modprobe.d/hid_apple.conf
-sudo dracut -f   # Fedora; rebuilds the initramfs. Debian/Ubuntu: sudo update-initramfs -u
+sudo dracut -f --verbose   # Fedora. Debian/Ubuntu: sudo update-initramfs -u
 ```
+
+The initramfs rebuild takes 1-3 minutes with little output; let it finish.
+The option has to be inside the initramfs because `hid_apple` is loaded from
+there at boot, so `/etc/modprobe.d` alone is not enough.
 
 Reboot, or apply it right away with
 `echo 0 | sudo tee /sys/module/hid_apple/parameters/fnmode`. This also affects
