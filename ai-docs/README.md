@@ -17,12 +17,14 @@ over USB HID.
 * LCD clock sync
 * LCD image and GIF animation upload (with 141-frame safety limit)
 * Key remapping (normal layer and FN layer)
+* Realtime lighting frames (`04 20`, USB) and displayed color readback (`04 F5`)
 * Hardware integration tests
 
 ### Not Yet Implemented
 
 * Macro recording and sending (protocol fully documented but not implemented)
-* Realtime streaming mode (`04 20`), see [Punkster81/AULA-F108-Driver].
+* Continuous realtime streaming (layers, music) on top of `04 20`; single
+  frames work, see [Punkster81/AULA-F108-Driver].
 
 [pu]: https://github.com/Punkster81/AULA-F108-Driver?tab=readme-ov-file#-layers
 
@@ -35,6 +37,7 @@ over USB HID.
 * [macro-protocol.md](macro-protocol.md) - Macro recording, storage, and HID transfer protocol
 * [ghidra-functions.md](ghidra-functions.md) - Index of analyzed Ghidra functions with addresses and descriptions
 * [firmware-update.md](firmware-update.md) - Firmware update protocol (Sonix ISP flasher)
+* [firmware-analysis.md](firmware-analysis.md) - SN32F290 firmware image: command handlers, flash pages, realtime lighting
 * [lcd-upload-investigation.md](lcd-upload-investigation.md) - LCD upload investigation and corruption incident
 * [sidelight-investigation.md](sidelight-investigation.md) - Sidelight LED investigation
 

@@ -139,6 +139,17 @@ Sent:     04 02 00 00 ...
 Response: 04 02 00 01 07 02 ...   (byte[4..5] = current mode/state)
 ```
 
+The firmware explains why (see [firmware-analysis.md](firmware-analysis.md)):
+a SET_REPORT only stores the command; the data phase for it (how the next
+reports are interpreted) is set up when the following GET_REPORT arrives.
+Without the GET, data reports are not accepted.
+
+**Do not poll.** Continuous GET_REPORTs with no pause make the keyboard drop
+one every few seconds, and the dropped request only fails after the kernel's
+5 s timeout. Right after `04 F0` the MCU does not answer USB at all for about
+1.5 ms (from ~0.3 to ~1.9 ms after the command). The 35 ms `cmdDelay` keeps
+clear of both.
+
 ### No State Query Commands (Write-Only Protocol)
 The keyboard does not support reading back its current configuration (lighting
 mode, brightness, speed, color, key remaps, etc.). The original Windows software
@@ -153,6 +164,10 @@ protocol.
 This means any tool that changes settings must track the desired state
 locally. The database is the source of truth; the keyboard is a write-only
 sink.
+
+The one exception is `04 F5` (see
+[Displayed Color Readback](#displayed-color-readback-04-f5)), which returns
+the LED levels the keyboard is showing, not the stored settings.
 
 ### USB Interface Details (Verified)
 
@@ -453,6 +468,72 @@ Byte 3: B
 ```
 
 Trailer `0x55AA` at end.
+
+**Every per-key send writes flash** (verified 2026-10-20). The firmware erases
+flash page `0x9C00` as soon as `04 23` arrives and programs the data as it
+comes in, so the colors survive a power cycle even when `04 F0` is never sent.
+It does so even for identical data. Other settings work the same way: `04 13`
+erases page `0x9800`, `04 11` page `0x9400`, `04 17` page `0x9000`. The
+flash endurance is not documented, so do not send these on every event; use
+realtime frames for frequent changes. A full per-key send over USB takes
+~0.92 s, almost all of it the 35 ms delays.
+
+### Realtime Lighting (`04 20`)
+Overlays colors on chosen keys from RAM only: nothing is written to flash, the
+other keys keep the keyboard's own lighting, and the keyboard returns to its
+own lighting for these keys when no frame arrives for 5 seconds. This is what
+the official software's music and screen modes use. Implemented as
+`Device.SetRealtime`; verified on hardware over USB.
+
+| Step | Packet  | Readback | Purpose                                     |
+| ---- | ------- | -------- | ------------------------------------------- |
+| 1    | `04 20` | Yes      | Header, byte[8] = number of data reports    |
+| 2    | Data    | No       | 16 entries of `[light_index R G B]` each    |
+| 3    | `04 02` | Yes      | Apply                                       |
+
+No `04 18` begin, `04 F0` finalize or clock-sync "handshake" is needed. The
+`00 01 5A ...` "unlock" packet in
+[Punkster81/AULA-F108-Driver](https://github.com/Punkster81/AULA-F108-Driver)
+is a clock sync with a fixed date.
+
+* **byte[8] must equal the number of data reports that follow.** The firmware
+  treats the next byte[8] reports as LED data whatever they are. With too few
+  data reports, the following `04 02` is read as entries (`04 02 00 00` =
+  F3 dim red), and with fast frames even the next header (`04 20 00 00`,
+  `08 00 00 00` = F3 red, F7 black). Punkster81's frames send 7 data reports
+  plus an empty one, which is why they use `08`.
+* Entries are applied to the LED PWM levels as each report arrives, with no
+  brightness or white-balance scaling, so `04 02` is not what makes them
+  visible. Unused entries in the last report should repeat a real entry:
+  zeros set light index 0 to black.
+* Every `04 20` re-arms a 50 x 100 ms timer. When it runs out the realtime
+  flag is cleared and the keyboard draws all keys again, so resend frames
+  every few seconds to keep them (the watch service uses 2.5 s).
+* While the flag is set, the keyboard stops copying its effect buffers to the
+  LEDs at all. Static colors and per-key layouts look unchanged, but animated
+  effects pause until the frame times out.
+* A frame takes ~75-145 ms over USB. Over the 2.4G dongle it is not known
+  yet.
+
+### Displayed Color Readback (`04 F5`)
+Returns the LED levels the keyboard is showing right now, including effects
+and realtime frames. Implemented as `Device.DisplayedColors`; verified on
+hardware over USB.
+
+| Step | Packet      | Readback | Purpose                                      |
+| ---- | ----------- | -------- | -------------------------------------------- |
+| 1    | `04 F5`     | Yes      | byte[8] = number of reports to read          |
+| 2    | GET_REPORT  | -        | One per report: 16 `[light_index R G B]`     |
+| 3    | `04 02`     | Yes      | Close; until then other commands are refused |
+
+Report `n` covers light indices `16n` to `16n+15`, so one report holds Esc and
+F1-F12. The values are raw PWM levels (static colors are already scaled by
+brightness and with red at 2/3), so sending them back with `04 20` shows
+exactly the same colors.
+
+Without step 3 the firmware stays in its "wait for `04 02`" state for about
+2 s and answers every other command with an error (`... ff`), so the next
+realtime frame is lost.
 
 ### Sidelight
 
@@ -778,9 +859,9 @@ and byte 3 is the battery level in percent (capped at 100; 0 means unknown).
 | `04 11`   | Key remap   | Host -> KB | Standard layer remap data      | No       |
 | `04 27`   | Key remap   | Host -> KB | FN layer remap data            | No       |
 | `04 13`   | Lighting    | Host -> KB | Lighting command init          | Yes      |
-| `04 23`   | Lighting    | Host -> KB | Per-key RGB data init          | No       |
-| `04 20`   | Lighting    | Host -> KB | Custom light real-time preview | No       |
-| `04 F5`   | Lighting    | KB -> Host | Key color readback             | No       |
+| `04 23`   | Lighting    | Host -> KB | Per-key RGB data init (erases flash page) | Yes |
+| `04 20`   | Lighting    | Host -> KB | Realtime frame, RAM only, 5 s  | Yes      |
+| `04 F5`   | Lighting    | KB -> Host | Displayed LED levels readback  | Yes      |
 | `00 80`   | Sidelight   | Host -> KB | Sidelight brightness data      | No       |
 | `04 72`   | LCD         | Host -> KB | Image upload header            | Yes      |
 | `04 28`   | LCD         | Host -> KB | Clock sync header              | Yes      |
